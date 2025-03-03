@@ -11,34 +11,95 @@ __all__ = ['extract_metadata']
 
 
 THRESHOLD = 0.90
+NUM_THRESHOLD = 0.90
 
+
+def _debug_image(im: cv2.Mat) -> None:
+    cv2.imshow('image', im)
+    cv2.waitKey(0)
+    cv2.destroyAllWindows()
+
+
+def _desc(selected_desc):
+    desc = ''
+    if 'crit' in selected_desc:
+        if 'chance' in selected_desc:
+            desc = '치명타 확률'
+        elif 'damage' in selected_desc:
+            desc = '치명타 피해'
+    elif 'effect' in selected_desc:
+        if 'resist' in selected_desc:
+            desc = '효과 저항'
+        elif 'hit' in selected_desc:
+            desc = '효과 적중'
+    elif 'speed' in selected_desc:
+        desc = '속도'
+    elif 'attack' in selected_desc:
+        desc = '공격력'
+    elif 'defence' in selected_desc:
+        desc = '방어력'
+    elif 'health' in selected_desc:
+        desc = '체력'
+
+    return desc
 
 def _detect(image: cv2.Mat, temp_path: str, tag: dict) -> dict:
     retval = {}
     template = cv2.imread(temp_path)
-    if template is not None:
-        result = cv2.matchTemplate(image, template, cv2.TM_CCOEFF_NORMED)
-        locations = np.where(result >= THRESHOLD)
-        for _ in zip(*locations[::-1]):
+    result = cv2.matchTemplate(image, template, cv2.TM_CCOEFF_NORMED)
+    locations = np.where(result >= THRESHOLD)
+    for _ in zip(*locations[::-1]):
+        if 'mainoption' in tag:
+            retval |= {'mainoption': {_desc(tag['mainoption'])}}
+        else:
             retval |= tag
-    else:
-        print(f"Warning: template image is not found: {temp_path}")
     return retval
 
 
-def _detect_order(image: cv2.Mat, temp_path: str, numbers: dict) -> dict:
-    retval = {}
-    num_locations = []
-    for num_path, num in numbers.items():
-        template = cv2.imread(num_path)
+def _detect_mop(desc_im: cv2.Mat, option_text: dict) -> dict:
+    pass
+    selected_desc = set()
+    # desc_im
+    for desc_path, desc in option_text.items():
+        template = cv2.imread(desc_path)
         assert template is not None
 
-        result = cv2.matchTemplate(image, template, cv2.TM_CCOEFF_NORMED)
-        locations = np.where(result >= THRESHOLD)
-        for i in zip(*locations[::-1]):
-            print(i)
-            # retval |= tag
-    return retval
+        result = cv2.matchTemplate(desc_im, template, cv2.TM_CCOEFF_NORMED)
+        locations = np.where(result >= NUM_THRESHOLD)
+        for _ in zip(*locations[::-1]):
+            selected_desc.add(desc)
+    return {'mainoption': _desc(selected_desc)}
+
+
+def _detect_sop(desc_im: cv2.Mat, num_im: cv2.Mat, op: str, option_text: dict, option_num: dict) -> dict:
+    num_text = ''
+    num_locations = []
+    
+    desc = _detect_mop(desc_im, option_text)['mainoption']
+
+    for num_path, num in option_num.items():
+        template = cv2.imread(num_path)
+        assert template is not None
+        dy, dx = template.shape[0:2]
+
+        detected = False
+        run_first = True
+        
+        while run_first or detected:
+            run_first = False
+            detected = False
+            result = cv2.matchTemplate(num_im, template, cv2.TM_CCOEFF_NORMED)
+            locations = np.where(result >= NUM_THRESHOLD)
+            for tx, ty in zip(*locations[::-1]):
+                detected = True
+                num_locations.append((tx, num))
+                cv2.rectangle(num_im, (tx, ty), (tx+dx, ty+dy), (255, 255, 255), -1)
+                break
+
+    for _, num in sorted(num_locations):
+        num_text += num
+        
+    return {op: {desc: num_text}}
 
 
 def _apply_masks(image, masks) -> cv2.Mat:
@@ -62,25 +123,22 @@ def extract_metadata(ex: Executor, image: cv2.Mat) -> dict:
     fs = []
 
     # item_fullname
-    for i, tag in chain(td['part_icon'].items(), td['part_set'].items()):
+    for i, tag in list(td['part_icon'].items()) + list(td['part_set'].items()):
         im = _apply_crop(image.copy(), masks['item_fullname'])
         fs.append(ex.submit(_detect, im, i, tag))
 
     # item_portrait
-    for i, tag in chain(td['lock'].items(), td['reinforce'].items()):
+    for i, tag in list(td['lock'].items()) + list(td['reinforce'].items()):
         im = _apply_crop(image.copy(), masks['item_portrait'])
         fs.append(ex.submit(_detect, im, i, tag))
 
     for op in ['mainoption', 'suboption_1', 'suboption_2', 'suboption_3', 'suboption_4']:
-        for i, tag in td['option_text'].items():
-            im = _apply_crop(image.copy(), masks[f'{op}_text'])
-            fs.append(ex.submit(_detect, im, i, tag))
-
-        for i, tag in td['option_num'].items():
-            im = _apply_crop(image.copy(), masks[f'{op}_num'])
-            fs.append(ex.submit(_detect_order, im, i, td['option_num']))
-        
-    
+        desc_im = _apply_crop(image.copy(), masks[f'{op}_text'])
+        if op == 'mainoption':
+            fs.append(ex.submit(_detect_mop, desc_im, td['option_text']))
+        else:
+            num_im = _apply_crop(image.copy(), masks[f'{op}_num'])
+            fs.append(ex.submit(_detect_sop, desc_im, num_im, op, td['option_text'], td['option_num']))
 
     for f in as_completed(fs):
         retval.update(f.result())

@@ -1,5 +1,7 @@
 from concurrent.futures import ProcessPoolExecutor as PPE
+from concurrent.futures import ThreadPoolExecutor as TPE
 
+import pprint
 import time
 import cv2
 import keyboard
@@ -17,17 +19,19 @@ MASK_REGIONS = [
 ]
 
 
-ex = PPE()
+ex = PPE(max_workers=16)
 
 def capture_screen():
     global ex
     with mss.mss() as sct:
-        monitor = sct.monitors[2]
+        monitor = sct.monitors[1]
+        time.sleep(0.01)
         sct_img = sct.grab(monitor)
         img = Image.frombytes("RGB", sct_img.size, sct_img.bgra, "raw", "BGRX")
         img_np = np.array(img)
         img_bgr = cv2.cvtColor(img_np, cv2.COLOR_RGB2BGR)
-        print(extract_metadata(ex, img_bgr))
+        data = extract_metadata(ex, img_bgr)
+        pprint.pprint(data)
 
 ctrl_pressed = False
 
