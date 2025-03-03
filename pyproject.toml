@@ -17,6 +17,7 @@ dependencies = [
     "pytesseract>=0.3.13",
     "rich>=13.9.4",
     "ruff>=0.9.7",
+    "tuna>=0.5.11",
 ]
 
 [dependency-groups]

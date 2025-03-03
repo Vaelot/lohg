@@ -116,6 +116,7 @@ def _apply_crop(image, crop_coord) -> cv2.Mat:
 
 def extract_metadata(ex: Executor, image: cv2.Mat) -> dict:
     retval = {}
+    temp = {}
     fs = []
 
     # item_fullname
@@ -130,7 +131,7 @@ def extract_metadata(ex: Executor, image: cv2.Mat) -> dict:
 
     for i, tag in td['reinforce'].items():
         im = _apply_crop(image.copy(), masks['item_portrait'])
-        fs.append(ex.submit(_detect, im, i, tag, 0.8))
+        fs.append(ex.submit(_detect, im, i, tag, 0.85))
 
     # options
     for op in ['mainoption', 'suboption_1', 'suboption_2', 'suboption_3', 'suboption_4']:
@@ -142,6 +143,19 @@ def extract_metadata(ex: Executor, image: cv2.Mat) -> dict:
             fs.append(ex.submit(_detect_sop, desc_im, num_im, op, td['option_text'], td['option_num']))
 
     for f in as_completed(fs):
-        retval.update(f.result())
+        temp.update(f.result())
+    
+    retval['part'] = temp.get('part', '')
+    retval['set'] = temp.get('set', '')
+    retval['type'] = temp.get('type', '')
+    retval['lock'] = temp.get('lock', None)
+    retval['mainoption'] = temp.get('mainoption', '')
+    retval['reinforce'] = temp.get('reinforce', '')
+    retval['suboption'] = [
+        temp.get('suboption_1', ''),
+        temp.get('suboption_2', ''),
+        temp.get('suboption_3', ''),
+        temp.get('suboption_4', '')
+    ]
 
     return retval
