@@ -4,14 +4,10 @@ from itertools import chain
 import cv2
 import numpy as np
 
-from config import template_dict as td, masks
+from config import template_dict as td, template_image_dict as tid, masks
 
 
 __all__ = ['extract_metadata']
-
-
-THRESHOLD = 0.90
-NUM_THRESHOLD = 0.90
 
 
 def _debug_image(im: cv2.Mat) -> None:
@@ -43,9 +39,9 @@ def _desc(selected_desc):
 
     return desc
 
-def _detect(image: cv2.Mat, temp_path: str, tag: dict) -> dict:
+def _detect(image: cv2.Mat, temp_path: str, tag: dict, THRESHOLD: float = 0.90) -> dict:
     retval = {}
-    template = cv2.imread(temp_path)
+    template = tid[temp_path]
     result = cv2.matchTemplate(image, template, cv2.TM_CCOEFF_NORMED)
     locations = np.where(result >= THRESHOLD)
     for _ in zip(*locations[::-1]):
@@ -56,29 +52,29 @@ def _detect(image: cv2.Mat, temp_path: str, tag: dict) -> dict:
     return retval
 
 
-def _detect_mop(desc_im: cv2.Mat, option_text: dict) -> dict:
+def _detect_mop(desc_im: cv2.Mat, option_text: dict, THRESHOLD: float = 0.90) -> dict:
     pass
     selected_desc = set()
     # desc_im
     for desc_path, desc in option_text.items():
-        template = cv2.imread(desc_path)
+        template = tid[desc_path]
         assert template is not None
 
         result = cv2.matchTemplate(desc_im, template, cv2.TM_CCOEFF_NORMED)
-        locations = np.where(result >= NUM_THRESHOLD)
+        locations = np.where(result >= THRESHOLD)
         for _ in zip(*locations[::-1]):
             selected_desc.add(desc)
     return {'mainoption': _desc(selected_desc)}
 
 
-def _detect_sop(desc_im: cv2.Mat, num_im: cv2.Mat, op: str, option_text: dict, option_num: dict) -> dict:
+def _detect_sop(desc_im: cv2.Mat, num_im: cv2.Mat, op: str, option_text: dict, option_num: dict, THRESHOLD: float = 0.90) -> dict:
     num_text = ''
     num_locations = []
     
     desc = _detect_mop(desc_im, option_text)['mainoption']
 
     for num_path, num in option_num.items():
-        template = cv2.imread(num_path)
+        template = tid[num_path]
         assert template is not None
         dy, dx = template.shape[0:2]
 
@@ -89,7 +85,7 @@ def _detect_sop(desc_im: cv2.Mat, num_im: cv2.Mat, op: str, option_text: dict, o
             run_first = False
             detected = False
             result = cv2.matchTemplate(num_im, template, cv2.TM_CCOEFF_NORMED)
-            locations = np.where(result >= NUM_THRESHOLD)
+            locations = np.where(result >= THRESHOLD)
             for tx, ty in zip(*locations[::-1]):
                 detected = True
                 num_locations.append((tx, num))
@@ -128,10 +124,15 @@ def extract_metadata(ex: Executor, image: cv2.Mat) -> dict:
         fs.append(ex.submit(_detect, im, i, tag))
 
     # item_portrait
-    for i, tag in list(td['lock'].items()) + list(td['reinforce'].items()):
+    for i, tag in td['lock'].items():
         im = _apply_crop(image.copy(), masks['item_portrait'])
-        fs.append(ex.submit(_detect, im, i, tag))
+        fs.append(ex.submit(_detect, im, i, tag, 0.9))
 
+    for i, tag in td['reinforce'].items():
+        im = _apply_crop(image.copy(), masks['item_portrait'])
+        fs.append(ex.submit(_detect, im, i, tag, 0.8))
+
+    # options
     for op in ['mainoption', 'suboption_1', 'suboption_2', 'suboption_3', 'suboption_4']:
         desc_im = _apply_crop(image.copy(), masks[f'{op}_text'])
         if op == 'mainoption':

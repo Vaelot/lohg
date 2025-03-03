@@ -19,7 +19,12 @@ MASK_REGIONS = [
 ]
 
 
-ex = PPE(max_workers=16)
+def init_import():
+    import config  # noqa: F401
+
+
+ex = PPE(max_workers=16, initializer=init_import)
+
 
 def capture_screen():
     global ex
